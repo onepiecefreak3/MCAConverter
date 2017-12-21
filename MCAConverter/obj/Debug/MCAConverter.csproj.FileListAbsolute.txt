@@ -1,0 +1,9 @@
+C:\Users\Kirito\Desktop\MCAConverter\MCAConverter\bin\Debug\MCAConverter.exe.config
+C:\Users\Kirito\Desktop\MCAConverter\MCAConverter\bin\Debug\MCAConverter.exe
+C:\Users\Kirito\Desktop\MCAConverter\MCAConverter\bin\Debug\MCAConverter.pdb
+C:\Users\Kirito\Desktop\MCAConverter\MCAConverter\obj\Debug\MCAConverter.csprojResolveAssemblyReference.cache
+C:\Users\Kirito\Desktop\MCAConverter\MCAConverter\obj\Debug\MCAConverter.csproj.CoreCompileInputs.cache
+C:\Users\Kirito\Desktop\MCAConverter\MCAConverter\obj\Debug\MCAConverter.exe
+C:\Users\Kirito\Desktop\MCAConverter\MCAConverter\obj\Debug\MCAConverter.pdb
+C:\Users\Kirito\Desktop\MCAConverter\MCAConverter\bin\Debug\System.ValueTuple.dll
+C:\Users\Kirito\Desktop\MCAConverter\MCAConverter\bin\Debug\System.ValueTuple.xml
