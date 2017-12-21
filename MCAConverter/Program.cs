@@ -72,7 +72,7 @@ namespace MCAConverter
             public short channelCount;
             public int sampleRate;
             public int avgBytesPerSec;
-            public short blockAlign = 0x2;
+            public short blockAlign;
             public short bitsPerSample = 0x10;
         }
         #endregion
@@ -164,9 +164,9 @@ namespace MCAConverter
                     Console.WriteLine("This is no mca file.");
                     Environment.Exit(0);
                 }
-                if (header.channelCount != 1)
+                if (header.channelCount > 2)
                 {
-                    Console.WriteLine("Only mca's with one channel are supported.");
+                    Console.WriteLine("Only mca's with 1 or 2 channels are supported.");
                     Environment.Exit(0);
                 }
 
@@ -220,7 +220,39 @@ namespace MCAConverter
 
                 //Decode NGC_DSP
                 br.BaseStream.Position = startOffset;
-                var decode = DecodeNGCDSP(br.ReadBytes(header.dataSize), header, channels);
+                byte[] decode;
+                int channelDataSize = header.dataSize;
+                if (header.channelCount == 1)
+                    //No interleave
+                    decode = DecodeNGCDSP(br.ReadBytes(header.dataSize), header, channels[0]);
+                else
+                {
+                    //Interleave
+
+                    //Get channelData
+                    var soundData = br.ReadBytes(header.dataSize);
+                    var channelData = new List<List<byte>>();
+                    for (int i = 0; i < header.channelCount; i++)
+                        channelData.Add(new List<byte>());
+                    using (var soundBr = new BinaryReaderX(new MemoryStream(soundData)))
+                    {
+                        while (soundBr.BaseStream.Position < soundBr.BaseStream.Length)
+                        {
+                            for (int i = 0; i < header.channelCount; i++)
+                            {
+                                channelData[i].AddRange(soundBr.ReadBytes(header.interleaveBlockSize));
+                            }
+                        }
+                    }
+
+                    //Decode channelData
+                    var tmpDec = new List<byte>();
+                    for (int i = 0; i < header.channelCount; i++)
+                        tmpDec.AddRange(DecodeNGCDSP(channelData[i].ToArray(), header, channels[i]));
+                    decode = tmpDec.ToArray();
+
+                    channelDataSize = decode.Length / header.channelCount;
+                }
 
                 //Create WAV
                 var wavHeader = new WAVHeader
@@ -228,7 +260,8 @@ namespace MCAConverter
                     fileSize = decode.Length + 0x28 - 0x8,
                     channelCount = header.channelCount,
                     sampleRate = header.sampleRate,
-                    avgBytesPerSec = header.sampleRate * 0x2
+                    avgBytesPerSec = header.sampleRate * 0x2,
+                    blockAlign = (short)(0x2 * header.channelCount)
                 };
                 var wavStream = new MemoryStream();
                 using (var bw = new BinaryWriterX(wavStream, true))
@@ -236,11 +269,99 @@ namespace MCAConverter
                     bw.WriteStruct(wavHeader);
                     bw.WriteASCII("data");
                     bw.Write(decode.Length);
-                    bw.Write(decode);
+
+                    if (header.channelCount == 1)
+                        bw.Write(decode);
+                    else
+                    {
+                        int sampleInChannel = 0;
+                        using (var decBr = new BinaryReaderX(new MemoryStream(decode)))
+                        {
+                            while (sampleInChannel < channelDataSize / 2)
+                            {
+                                for (int i = 0; i < header.channelCount; i++)
+                                {
+                                    decBr.BaseStream.Position = i * channelDataSize + sampleInChannel * 2;
+                                    bw.Write(decBr.ReadInt16());
+                                }
+                                sampleInChannel++;
+                            }
+                        }
+                    }
                 }
 
                 return wavStream.ToArray();
             }
+        }
+
+        public static List<Channel> SetupCoefs(Stream input, int coefOffset, int channelCount, int coefSpacing)
+        {
+            var startOffset = input.Position;
+
+            var channels = new List<Channel>();
+
+            using (var br = new BinaryReaderX(input, true))
+            {
+                br.BaseStream.Position = coefOffset;
+                using (var coefBr = new BinaryReaderX(new MemoryStream(br.ReadBytes(channelCount * coefSpacing))))
+                {
+                    for (int ch = 0; ch < channelCount; ch++)
+                    {
+                        channels.Add(new Channel());
+                        for (int i = 0; i < 16; i++)
+                        {
+                            channels[ch].adpcmCoefs.Add(coefBr.ReadInt16());
+                        }
+                        coefBr.BaseStream.Position += coefSpacing - 0x20;
+                    }
+                }
+            }
+
+            input.Position = startOffset;
+
+            return channels;
+        }
+
+        static byte[] DecodeNGCDSP(byte[] soundData, Header header, Channel channel)
+        {
+            var ms = new MemoryStream();
+
+            using (var outputBw = new BinaryWriterX(ms, true))
+            using (var soundBr = new BinaryReaderX(new MemoryStream(soundData)))
+            {
+                short hist1 = 0;
+                short hist2 = 0;
+
+                while (soundBr.BaseStream.Position < soundBr.BaseStream.Length)
+                {
+                    // Each frame, we need to read the header byte and use it to set the scale and coefficient values:
+                    byte head = soundBr.ReadByte();
+
+                    ushort scale = (ushort)(1 << (head & 0xF));
+                    byte coefIndex = (byte)(head >> 4);
+                    short coef1 = channel.adpcmCoefs[2 * coefIndex];
+                    short coef2 = channel.adpcmCoefs[2 * coefIndex + 1];
+
+                    // 7 bytes per frame
+                    for (uint i = 0; i < 7; i++)
+                    {
+                        byte b = soundBr.ReadByte();
+
+                        // 2 samples per byte
+                        for (uint s = 0; s < 2; s++)
+                        {
+                            sbyte adpcmNibble = (s == 0) ? GetHighNibble(b) : GetLowNibble(b);
+                            short sample = Clamp(((adpcmNibble * scale) << 11) + 1024 + ((coef1 * hist1) + (coef2 * hist2)) >> 11);
+
+                            hist2 = hist1;
+                            hist1 = sample;
+                            outputBw.Write(sample);
+                        }
+                    }
+                }
+            }
+
+            return ms.ToArray();
         }
 
         public static byte[] EncodeWAVtoMCA(string wavFile, int version, int loopStart, int loopEnd)
@@ -317,86 +438,6 @@ namespace MCAConverter
 
                 return ms.ToArray();
             }
-        }
-
-        public static List<Channel> SetupCoefs(Stream input, int coefOffset, int channelCount, int coefSpacing)
-        {
-            var startOffset = input.Position;
-
-            var channels = new List<Channel>();
-
-            using (var br = new BinaryReaderX(input, true))
-            {
-                br.BaseStream.Position = coefOffset;
-                using (var coefBr = new BinaryReaderX(new MemoryStream(br.ReadBytes(coefSpacing))))
-                {
-                    for (int ch = 0; ch < channelCount; ch++)
-                    {
-                        channels.Add(new Channel());
-                        for (int i = 0; i < 16; i++)
-                        {
-                            channels[ch].adpcmCoefs.Add(coefBr.ReadInt16());
-                        }
-                        br.BaseStream.Position = coefOffset + (ch + 1) * coefSpacing;
-                    }
-                }
-            }
-
-            input.Position = startOffset;
-
-            return channels;
-        }
-
-        static byte[] DecodeNGCDSP(byte[] soundData, Header header, List<Channel> channels)
-        {
-            var ms = new MemoryStream();
-
-            using (var outputBw = new BinaryWriterX(ms, true))
-            using (var soundBr = new BinaryReaderX(new MemoryStream(soundData)))
-            {
-                short hist1 = 0;// header.initHist1;
-                short hist2 = 0; //header.initHist2;
-
-                while (soundBr.BaseStream.Position < soundBr.BaseStream.Length)
-                {
-                    for (int chanNum = 0; chanNum < header.channelCount; chanNum++)
-                    {
-                        var block = soundBr.ReadBytes(header.interleaveBlockSize);
-                        using (var blockBr = new BinaryReaderX(new MemoryStream(block)))
-                        {
-                            while (blockBr.BaseStream.Position < blockBr.BaseStream.Length)
-                            {
-                                // Each frame, we need to read the header byte and use it to set the scale and coefficient values:
-                                byte head = blockBr.ReadByte();
-
-                                ushort scale = (ushort)(1 << (head & 0xF));
-                                byte coefIndex = (byte)(head >> 4);
-                                short coef1 = channels[chanNum].adpcmCoefs[2 * coefIndex];
-                                short coef2 = channels[chanNum].adpcmCoefs[2 * coefIndex + 1];
-
-                                // 7 bytes per frame
-                                for (uint i = 0; i < 7; i++)
-                                {
-                                    byte b = blockBr.ReadByte();
-
-                                    // 2 samples per byte
-                                    for (uint s = 0; s < 2; s++)
-                                    {
-                                        sbyte adpcmNibble = (s == 0) ? GetHighNibble(b) : GetLowNibble(b);
-                                        short sample = Clamp(((adpcmNibble * scale) << 11) + 1024 + ((coef1 * hist1) + (coef2 * hist2)) >> 11);
-
-                                        hist2 = hist1;
-                                        hist1 = sample;
-                                        outputBw.Write(sample);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            return ms.ToArray();
         }
 
         static short[][] GetCoefs(byte[] soundData, int numSamples)
