@@ -7,6 +7,9 @@ using MCAConverter.IO;
 using System.IO;
 using static System.Math;
 
+/*Code reference:
+https://github.com/jackoalan/gc-dspadpcm-encode*/
+
 namespace MCAConverter
 {
     public class NGCDSPEncoder
