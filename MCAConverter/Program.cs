@@ -528,7 +528,7 @@ namespace MCAConverter
                     {
                         for (int i = 0; i < br.BaseStream.Length - br.BaseStream.Position; i += 2)
                             pcmBlock.Add(br.ReadInt16());
-                        while (pcmBlock.Count() < 14) pcmBlock.Add(0);
+                        while (pcmBlock.Count() < 16) pcmBlock.Add(0);
                     }
                     else
                     {
