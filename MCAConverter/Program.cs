@@ -376,9 +376,9 @@ namespace MCAConverter
                 {
                     throw new Exception("Unsupported WAV.");
                 }
-                if (wavHeader.channelCount != 1)
+                if (wavHeader.channelCount > 2)
                 {
-                    throw new Exception("More than one channel isn't supported.");
+                    throw new Exception("Only 1 and 2 channel are supported.");
                 }
                 if (wavHeader.formatTag != 1)
                 {
@@ -401,11 +401,55 @@ namespace MCAConverter
                 var soundDataSize = br.ReadInt32();
                 var soundData = br.ReadBytes(soundDataSize);
 
-                //Create coefs
-                var coefs = GetCoefs(soundData, numSamples);
+                List<short[][]> coefs = new List<short[][]>();
+                byte[] encode;
+                if (wavHeader.channelCount == 1)
+                {
+                    //Create Coefs
+                    coefs.Add(GetCoefs(soundData, numSamples));
 
-                //Encode
-                var encode = EncodeNGCDSP(soundData, numSamples, coefs);
+                    //Encode
+                    encode = EncodeNGCDSP(soundData, numSamples, coefs[0]);
+                }
+                else
+                {
+                    //Split soundData into their channels
+                    var channelData = new List<List<byte>>();
+                    for (int i = 0; i < wavHeader.channelCount; i++)
+                        channelData.Add(new List<byte>());
+                    using (var soundBr = new BinaryReaderX(new MemoryStream(soundData)))
+                    {
+                        while (soundBr.BaseStream.Position < soundBr.BaseStream.Length)
+                            for (int i = 0; i < wavHeader.channelCount; i++)
+                            {
+                                channelData[i].AddRange(soundBr.ReadBytes(2));
+                            }
+                    }
+
+                    //Create coefs
+                    for (int i = 0; i < wavHeader.channelCount; i++)
+                        coefs.Add(GetCoefs(channelData[i].ToArray(), numSamples));
+
+                    //Encode
+                    List<List<byte>> tmpEnc = new List<List<byte>>();
+                    for (int i = 0; i < wavHeader.channelCount; i++)
+                        tmpEnc.Add(EncodeNGCDSP(channelData[i].ToArray(), numSamples, coefs[i]).ToList());
+
+                    //Pad encoded data to interleaveBlockSize
+                    for (int i = 0; i < wavHeader.channelCount; i++)
+                        tmpEnc[i].AddRange(new byte[0x100 - tmpEnc[i].Count() % 0x100]);
+
+                    //Merge encoded data into interleaving blocks
+                    encode = new byte[tmpEnc[0].Count() * wavHeader.channelCount];
+                    int blocksIn = 0;
+                    int blocksInData = tmpEnc[0].Count() / 0x100;
+                    while (blocksIn < blocksInData)
+                    {
+                        for (int i = 0; i < wavHeader.channelCount; i++)
+                            Array.Copy(tmpEnc[i].ToArray(), blocksIn * 0x100, encode, blocksIn * 0x100 * wavHeader.channelCount + i * 0x100, 0x100);
+                        blocksIn++;
+                    }
+                }
 
                 //Create MCA
                 var mcaHeader = new Header
@@ -416,7 +460,7 @@ namespace MCAConverter
                     sampleRate = wavHeader.sampleRate,
                     loopStart = loopStart,
                     loopEnd = loopEnd,
-                    headSize = 0x34 + 0x30 * wavHeader.channelCount,
+                    headSize = ((version < 5) ? 0x34 : 0x38) + 0x30 * wavHeader.channelCount,
                     dataSize = encode.Length,
                     unk4 = 0,
                     unk5 = 0
@@ -425,13 +469,19 @@ namespace MCAConverter
                 using (var bw = new BinaryWriterX(ms, true))
                 {
                     bw.WriteStruct(mcaHeader);
-                    bw.Write(0);
-                    bw.Write(0);
+                    bw.WritePadding(8);
+                    if (version >= 5)
+                    {
+                        bw.Write(0x38 + wavHeader.channelCount * 0x30);
+                    }
 
-                    for (var i = 0; i < 8; i++)
-                        for (var j = 0; j < 2; j++)
-                            bw.Write(coefs[i][j]);
-                    bw.WritePadding(0x10);
+                    for (int h = 0; h < wavHeader.channelCount; h++)
+                    {
+                        for (var i = 0; i < 8; i++)
+                            for (var j = 0; j < 2; j++)
+                                bw.Write(coefs[h][i][j]);
+                        bw.WritePadding(0x10);
+                    }
 
                     bw.Write(encode);
                 }
