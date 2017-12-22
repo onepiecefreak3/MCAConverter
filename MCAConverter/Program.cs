@@ -145,8 +145,6 @@ namespace MCAConverter
                     }
                 }
 
-                Console.WriteLine($"\nEncoding information:\n   Version: {version}\n   LoopStart: {loopStart}\n   LoopEnd: {loopEnd}");
-
                 var mca = EncodeWAVtoMCA(args[1], version, loopStart, loopEnd);
                 File.WriteAllBytes(args[1] + ".mca", mca);
             }
@@ -171,6 +169,17 @@ namespace MCAConverter
                     Console.WriteLine("Only mca's with 1 or 2 channels are supported.");
                     Environment.Exit(0);
                 }
+
+                //Output meta
+                Console.WriteLine($"\nMeta:\n" +
+                    $"  Version: {header.version}\n" +
+                    $"\n" +
+                    $"  Channels: {header.channelCount}\n" +
+                    $"  SampleRate: {header.sampleRate}\n" +
+                    $"  Samples: {header.numSamples}\n" +
+                    $"\n" +
+                    $"  LoopStart: {header.loopStart}\n" +
+                    $"  LoopEnd: {header.loopEnd}");
 
                 //Version specifics
                 int headSize, coefShift, coefStart, startOffset, coefOffset;
@@ -397,6 +406,17 @@ namespace MCAConverter
                     loopEnd = loopStart;
                 if (loopEnd > numSamples)
                     loopEnd = numSamples;
+
+                //output Meta
+                Console.WriteLine($"\nMeta:\n" +
+                    $"  Version: {version}\n" +
+                    $"\n" +
+                    $"  Channels: {wavHeader.channelCount}\n" +
+                    $"  SampleRate: {wavHeader.sampleRate}\n" +
+                    $"  Samples: {numSamples}\n" +
+                    $"\n" +
+                    $"  LoopStart: {loopStart}\n" +
+                    $"  LoopEnd: {loopEnd}");
 
                 //Encode NGCDSP
                 br.BaseStream.Position += 4;
