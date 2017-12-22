@@ -145,6 +145,8 @@ namespace MCAConverter
                     }
                 }
 
+                Console.WriteLine($"\nEncoding information:\n   Version: {version}\n   LoopStart: {loopStart}\n   LoopEnd: {loopEnd}");
+
                 var mca = EncodeWAVtoMCA(args[1], version, loopStart, loopEnd);
                 File.WriteAllBytes(args[1] + ".mca", mca);
             }
