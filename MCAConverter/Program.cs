@@ -418,8 +418,11 @@ namespace MCAConverter
                     $"  LoopStart: {loopStart}\n" +
                     $"  LoopEnd: {loopEnd}");
 
+                //loop to data portion
+                while (br.ReadString(4) != "data")
+                    br.ReadBytes(br.ReadInt32());
+
                 //Encode NGCDSP
-                br.BaseStream.Position += 4;
                 var soundDataSize = br.ReadInt32();
                 var soundData = br.ReadBytes(soundDataSize);
 
